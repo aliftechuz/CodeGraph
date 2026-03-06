@@ -15,7 +15,7 @@ EXTENSION_TO_LANGUAGE: dict[str, str] = {
     ".tsx": "typescript",
     ".go": "go",
     ".dart": "dart",
-    ".cs": "c_sharp",
+    ".cs": "csharp",
 }
 
 # ── Tree-sitter node type mappings per language ──────────────────────────────
@@ -94,7 +94,7 @@ LANGUAGE_MAPPINGS: dict[str, dict[str, list[str]]] = {
         "variable": ["initialized_variable_definition", "static_final_declaration"],
         "string": ["string_literal"],
     },
-    "c_sharp": {
+    "csharp": {
         "class": ["class_declaration", "struct_declaration", "interface_declaration", "enum_declaration", "record_declaration"],
         "function": ["method_declaration", "local_function_statement", "constructor_declaration"],
         "import": ["using_directive"],
@@ -135,7 +135,7 @@ ENDPOINT_PATTERNS: dict[str, list[str]] = {
         "#[Route", "@Route",
     ],
     "dart": [],
-    "c_sharp": [
+    "csharp": [
         "[HttpGet", "[HttpPost", "[HttpPut", "[HttpDelete", "[HttpPatch",
         "[Route",
     ],
@@ -151,7 +151,7 @@ DB_MODEL_PATTERNS: dict[str, list[str]] = {
     "javascript": ["Schema", "model(", "mongoose.model"],
     "php": ["Model", "Entity", "HasFactory"],
     "dart": ["@Entity", "@Table"],
-    "c_sharp": ["DbContext", "[Table", "EntityTypeConfiguration"],
+    "csharp": ["DbContext", "[Table", "EntityTypeConfiguration"],
 }
 
 # ── Directories to skip during indexing ──────────────────────────────────────
