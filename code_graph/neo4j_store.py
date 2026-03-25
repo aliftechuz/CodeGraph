@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from typing import Any
 
 from neo4j import AsyncGraphDatabase
+from neo4j.exceptions import TransientError
 
 from .schema import CodeNode, CodeRelationship
 
 log = logging.getLogger("code_graph.neo4j")
+
+MAX_RETRIES = 5
+BASE_DELAY = 0.1  # seconds
+
+
+async def _retry_on_deadlock(coro_factory, description: str = "operation"):
+    """Retry a Neo4j operation on TransientError (deadlocks) with exponential backoff + jitter."""
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return await coro_factory()
+        except TransientError as exc:
+            if attempt == MAX_RETRIES:
+                raise
+            delay = BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 0.1)
+            log.warning(
+                "Deadlock on %s (attempt %d/%d), retrying in %.2fs",
+                description, attempt, MAX_RETRIES, delay,
+            )
+            await asyncio.sleep(delay)
 
 # All valid node labels
 NODE_LABELS = [
@@ -65,15 +87,17 @@ class Neo4jStore:
         for node in nodes:
             by_label.setdefault(node.label, []).append(node.to_dict())
 
-        async with self._driver.session() as session:
-            for label, items in by_label.items():
-                query = f"""
-                UNWIND $items AS item
-                MERGE (n:{label} {{fqn: item.fqn}})
-                SET n += item
-                """
-                await session.run(query, items=items)
+        async def _do():
+            async with self._driver.session() as session:
+                for label, items in by_label.items():
+                    query = f"""
+                    UNWIND $items AS item
+                    MERGE (n:{label} {{fqn: item.fqn}})
+                    SET n += item
+                    """
+                    await session.run(query, items=items)
 
+        await _retry_on_deadlock(_do, "upsert_nodes")
         log.info("Upserted %d nodes across %d labels", len(nodes), len(by_label))
 
     async def upsert_relationships(self, rels: list[CodeRelationship]):
@@ -90,27 +114,32 @@ class Neo4jStore:
         for rel in rels:
             by_type.setdefault(rel.rel_type, []).append(rel.to_dict())
 
-        async with self._driver.session() as session:
-            for rel_type, items in by_type.items():
-                # MERGE on fqn — target may not exist yet, create placeholder
-                query = f"""
-                UNWIND $items AS item
-                MERGE (a {{fqn: item.from_fqn}})
-                MERGE (b {{fqn: item.to_fqn}})
-                MERGE (a)-[r:{rel_type}]->(b)
-                SET r += item
-                """
-                await session.run(query, items=items)
+        async def _do():
+            async with self._driver.session() as session:
+                for rel_type, items in by_type.items():
+                    # MERGE on fqn — target may not exist yet, create placeholder
+                    query = f"""
+                    UNWIND $items AS item
+                    MERGE (a {{fqn: item.from_fqn}})
+                    MERGE (b {{fqn: item.to_fqn}})
+                    MERGE (a)-[r:{rel_type}]->(b)
+                    SET r += item
+                    """
+                    await session.run(query, items=items)
 
+        await _retry_on_deadlock(_do, "upsert_relationships")
         log.info("Upserted %d relationships across %d types", len(rels), len(by_type))
 
     async def clear_file(self, file_path: str, repo: str):
         """Delete all nodes (and their relationships) originating from a specific file."""
-        async with self._driver.session() as session:
-            await session.run(
-                "MATCH (n {file_path: $file_path, repo: $repo}) DETACH DELETE n",
-                file_path=file_path, repo=repo,
-            )
+        async def _do():
+            async with self._driver.session() as session:
+                await session.run(
+                    "MATCH (n {file_path: $file_path, repo: $repo}) DETACH DELETE n",
+                    file_path=file_path, repo=repo,
+                )
+
+        await _retry_on_deadlock(_do, f"clear_file({file_path})")
 
     async def clear_repo(self, repo: str):
         """Delete all nodes for a repository."""
