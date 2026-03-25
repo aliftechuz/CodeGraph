@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .languages import EXTENSION_TO_LANGUAGE, SKIP_DIRS
 from .neo4j_store import Neo4jStore
-from .parser import FileParseResult, content_hash, parse_file
+from .parser import FileParseResult, content_hash, parse_file, detect_language
 from .schema import CodeNode, CodeRelationship
 
 log = logging.getLogger("code_graph.indexer")
@@ -99,6 +99,11 @@ class Indexer:
     ):
         async with self._sem:
             try:
+                lang = detect_language(str(fpath))
+                if lang is None:
+                    stats["skipped"] += 1
+                    return
+
                 source = fpath.read_bytes()
 
                 # Incremental check
